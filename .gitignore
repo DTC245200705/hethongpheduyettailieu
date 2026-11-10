@@ -1,0 +1,19 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+TestResults/
+
+## Environment & Secrets
+.env
+*.local.json
+
+## OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
