@@ -27,7 +27,8 @@ app.MapGet("/", () => Results.Ok(new
     timestampUtc = DateTime.UtcNow
 }));
 
-app.MapDocumentCrudEndpoints();
+var documentsGroup = app.MapDocumentCrudEndpoints();
+documentsGroup.MapDocumentWorkflowEndpoints();
 
 app.Run();
 
