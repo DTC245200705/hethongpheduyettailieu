@@ -1,5 +1,6 @@
 using Document.Api.Data;
 using Document.Api.Endpoints;
+using Document.Api.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,11 @@ var connectionString = builder.Configuration.GetConnectionString("DocumentDb")
 
 builder.Services.AddDbContext<DocumentDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.Configure<RabbitMqOptions>(
+    builder.Configuration.GetSection(RabbitMqOptions.SectionName));
+builder.Services.AddSingleton<RabbitMqPublisher>();
+builder.Services.AddHostedService<OutboxPublisherWorker>();
 
 var app = builder.Build();
 
@@ -26,6 +32,13 @@ app.MapGet("/", () => Results.Ok(new
     status = "Running",
     timestampUtc = DateTime.UtcNow
 }));
+
+app.MapGet("/outbox/stats", async (DocumentDbContext db, CancellationToken ct) =>
+{
+    var pending = await db.OutboxMessages.CountAsync(m => m.ProcessedAtUtc == null, ct);
+    var processed = await db.OutboxMessages.CountAsync(m => m.ProcessedAtUtc != null, ct);
+    return Results.Ok(new { pending, processed });
+}).WithTags("Observability");
 
 var documentsGroup = app.MapDocumentCrudEndpoints();
 documentsGroup.MapDocumentWorkflowEndpoints();
