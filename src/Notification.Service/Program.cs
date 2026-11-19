@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Notification.Service.Data;
+using Notification.Service.Messaging;
+using Notification.Service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +13,14 @@ var connectionString = builder.Configuration.GetConnectionString("NotificationDb
 
 builder.Services.AddDbContext<NotificationDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.Configure<RabbitMqOptions>(
+    builder.Configuration.GetSection(RabbitMqOptions.SectionName));
+
+builder.Services.AddScoped<IRealtimeNotifier, NoOpRealtimeNotifier>();
+builder.Services.AddScoped<NotificationDispatcher>();
+builder.Services.AddSingleton<DocumentEventConsumer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DocumentEventConsumer>());
 
 var app = builder.Build();
 
