@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Notification.Service.Data;
+using Notification.Service.Endpoints;
+using Notification.Service.Hubs;
 using Notification.Service.Messaging;
 using Notification.Service.Services;
 
@@ -7,6 +9,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.SetIsOriginAllowed(_ => true)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 var connectionString = builder.Configuration.GetConnectionString("NotificationDb")
     ?? throw new InvalidOperationException("ConnectionStrings:NotificationDb is required.");
@@ -17,13 +31,14 @@ builder.Services.AddDbContext<NotificationDbContext>(options =>
 builder.Services.Configure<RabbitMqOptions>(
     builder.Configuration.GetSection(RabbitMqOptions.SectionName));
 
-builder.Services.AddScoped<IRealtimeNotifier, NoOpRealtimeNotifier>();
+builder.Services.AddScoped<IRealtimeNotifier, SignalRRealtimeNotifier>();
 builder.Services.AddScoped<NotificationDispatcher>();
 builder.Services.AddSingleton<DocumentEventConsumer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DocumentEventConsumer>());
 
 var app = builder.Build();
 
+app.UseCors();
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -35,6 +50,9 @@ app.MapGet("/", () => Results.Ok(new
     status = "Running",
     timestampUtc = DateTime.UtcNow
 }));
+
+app.MapNotificationEndpoints();
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();
 
