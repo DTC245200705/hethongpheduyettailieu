@@ -1,12 +1,33 @@
+using System.Text.Json;
 using Document.Api.Data;
 using Document.Api.Endpoints;
+using Document.Api.HealthChecks;
 using Document.Api.Messaging;
+using Document.Api.Middleware;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
+using Serilog.Events;
+using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Host.UseSerilog((_, lc) => lc
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("Service", "Document.Api")
+    .WriteTo.Console(new RenderedCompactJsonFormatter()));
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+});
 
 var connectionString = builder.Configuration.GetConnectionString("DocumentDb")
     ?? throw new InvalidOperationException("ConnectionStrings:DocumentDb is required.");
@@ -19,7 +40,15 @@ builder.Services.Configure<RabbitMqOptions>(
 builder.Services.AddSingleton<RabbitMqPublisher>();
 builder.Services.AddHostedService<OutboxPublisherWorker>();
 
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgresHealthCheck>("postgresql")
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq");
+
 var app = builder.Build();
+
+app.UseCors();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseSerilogRequestLogging();
 
 app.UseSwagger();
 app.UseSwaggerUI();
@@ -32,6 +61,28 @@ app.MapGet("/", () => Results.Ok(new
     status = "Running",
     timestampUtc = DateTime.UtcNow
 }));
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var payload = new
+        {
+            service = "Document.Api",
+            status = report.Status.ToString(),
+            totalDurationMs = Math.Round(report.TotalDuration.TotalMilliseconds, 2),
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                description = e.Value.Description,
+                durationMs = Math.Round(e.Value.Duration.TotalMilliseconds, 2)
+            })
+        };
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+    }
+});
 
 app.MapGet("/outbox/stats", async (DocumentDbContext db, CancellationToken ct) =>
 {

@@ -1,11 +1,26 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Notification.Service.Data;
 using Notification.Service.Endpoints;
+using Notification.Service.HealthChecks;
 using Notification.Service.Hubs;
 using Notification.Service.Messaging;
+using Notification.Service.Middleware;
 using Notification.Service.Services;
+using Serilog;
+using Serilog.Events;
+using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((_, lc) => lc
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .Enrich.WithProperty("Service", "Notification.Service")
+    .WriteTo.Console(new RenderedCompactJsonFormatter()));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -36,9 +51,16 @@ builder.Services.AddScoped<NotificationDispatcher>();
 builder.Services.AddSingleton<DocumentEventConsumer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DocumentEventConsumer>());
 
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgresHealthCheck>("postgresql")
+    .AddCheck<RabbitMqConsumerHealthCheck>("rabbitmq");
+
 var app = builder.Build();
 
 app.UseCors();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseSerilogRequestLogging();
+
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -50,6 +72,28 @@ app.MapGet("/", () => Results.Ok(new
     status = "Running",
     timestampUtc = DateTime.UtcNow
 }));
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var payload = new
+        {
+            service = "Notification.Service",
+            status = report.Status.ToString(),
+            totalDurationMs = Math.Round(report.TotalDuration.TotalMilliseconds, 2),
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                description = e.Value.Description,
+                durationMs = Math.Round(e.Value.Duration.TotalMilliseconds, 2)
+            })
+        };
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+    }
+});
 
 app.MapNotificationEndpoints();
 app.MapHub<NotificationHub>("/hubs/notifications");
