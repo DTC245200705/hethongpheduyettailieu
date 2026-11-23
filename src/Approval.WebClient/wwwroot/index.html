@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hệ thống Phê duyệt Tài liệu Phân tán (.NET 10)</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-badge">D12</div>
+      <div>
+        <h1>DocApprove Distributed</h1>
+        <p>.NET 10 Minimal API · RabbitMQ · SignalR · PostgreSQL</p>
+      </div>
+    </div>
+
+    <div class="topbar-controls">
+      <div class="user-switcher">
+        <label for="currentUserSelect">Đang đăng nhập:</label>
+        <select id="currentUserSelect">
+          <option value="vinh.duong">vinh.duong (Người tạo)</option>
+          <option value="truong.khoa">truong.khoa (Người phê duyệt)</option>
+          <option value="giam.doc">giam.doc (Ban giám đốc)</option>
+          <option value="custom">Nhập tài khoản khác...</option>
+        </select>
+        <input id="customUserInput" type="text" placeholder="username..." class="hidden" />
+      </div>
+
+      <span id="signalrStatus" class="status-pill offline" title="Trạng thái kết nối SignalR real-time">
+        ● SignalR: Đang kết nối...
+      </span>
+
+      <button id="btnSystemStatus" class="btn btn-ghost" title="Kiểm tra Health Check & Outbox">
+        Trạng thái hệ thống
+      </button>
+
+      <button id="btnNotifications" class="btn btn-icon" title="Thông báo real-time">
+        🔔 <span id="unreadBadge" class="badge hidden">0</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-label">Tổng hồ sơ</span>
+        <strong id="statTotal">0</strong>
+      </div>
+      <div class="stat-card draft">
+        <span class="stat-label">Bản nháp (Draft)</span>
+        <strong id="statDraft">0</strong>
+      </div>
+      <div class="stat-card submitted">
+        <span class="stat-label">Chờ phê duyệt (Submitted)</span>
+        <strong id="statSubmitted">0</strong>
+      </div>
+      <div class="stat-card approved">
+        <span class="stat-label">Đã phê duyệt (Approved)</span>
+        <strong id="statApproved">0</strong>
+      </div>
+      <div class="stat-card rejected">
+        <span class="stat-label">Bị từ chối (Rejected)</span>
+        <strong id="statRejected">0</strong>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div class="filters">
+        <select id="filterStatus">
+          <option value="">Tất cả trạng thái</option>
+          <option value="Draft">Draft (Nháp)</option>
+          <option value="Submitted">Submitted (Chờ duyệt)</option>
+          <option value="Approved">Approved (Đã duyệt)</option>
+          <option value="Rejected">Rejected (Từ chối)</option>
+        </select>
+
+        <select id="filterScope">
+          <option value="all">Tất cả tài liệu</option>
+          <option value="createdBy">Do tôi tạo</option>
+          <option value="approver">Giao tôi phê duyệt</option>
+        </select>
+
+        <input id="filterSearch" type="text" placeholder="Tìm theo tiêu đề hoặc nội dung..." />
+        <button id="btnRefresh" class="btn btn-secondary">Làm mới</button>
+      </div>
+
+      <button id="btnOpenCreate" class="btn btn-primary">+ Tạo tài liệu mới</button>
+    </section>
+
+    <section class="workspace">
+      <div class="panel table-panel">
+        <div class="panel-header">
+          <h2>Danh sách tài liệu / hồ sơ</h2>
+          <a id="swaggerLink" href="http://localhost:5001/swagger" target="_blank" rel="noopener">Mở Swagger API ↗</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tiêu đề</th>
+                <th>Người tạo</th>
+                <th>Người phê duyệt</th>
+                <th>Trạng thái</th>
+                <th>Cập nhật</th>
+              </tr>
+            </thead>
+            <tbody id="documentsBody">
+              <tr><td colspan="5" class="empty-cell">Đang tải dữ liệu...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel detail-panel" id="detailPanel">
+        <div class="empty-detail">
+          <p>Chọn một tài liệu bên trái để xem chi tiết, thực hiện gửi duyệt / phê duyệt / từ chối và theo dõi lịch sử xử lý.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Create Document Modal -->
+  <div id="createModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Tạo tài liệu phê duyệt mới</h3>
+        <button class="close-btn" data-close="createModal">&times;</button>
+      </div>
+      <form id="createForm">
+        <div class="form-group">
+          <label>Tiêu đề hồ sơ *</label>
+          <input id="docTitle" type="text" required placeholder="VD: Đề xuất mua sắm thiết bị phòng Lab K23" />
+        </div>
+        <div class="form-group">
+          <label>Nội dung chi tiết *</label>
+          <textarea id="docContent" rows="5" required placeholder="Mô tả nội dung cần phê duyệt, kinh phí, thời gian..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Người tạo *</label>
+            <input id="docCreatedBy" type="text" required readonly />
+          </div>
+          <div class="form-group">
+            <label>Người phê duyệt *</label>
+            <input id="docApprover" type="text" required value="truong.khoa" list="approverSuggestions" />
+            <datalist id="approverSuggestions">
+              <option value="truong.khoa"></option>
+              <option value="giam.doc"></option>
+              <option value="vinh.duong"></option>
+            </datalist>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" data-close="createModal">Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu bản nháp (Draft)</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- System Health Modal -->
+  <div id="healthModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-header">
+        <h3>Giám sát Health Check & Transactional Outbox</h3>
+        <button class="close-btn" data-close="healthModal">&times;</button>
+      </div>
+      <div id="healthContent" class="health-grid">Đang kiểm tra...</div>
+      <div class="modal-actions">
+        <button id="btnRecheckHealth" class="btn btn-primary">Kiểm tra lại</button>
+        <button class="btn btn-secondary" data-close="healthModal">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notifications Drawer -->
+  <aside id="notificationDrawer" class="drawer hidden">
+    <div class="drawer-header">
+      <h3>Thông báo (<span id="drawerUserLabel"></span>)</h3>
+      <div>
+        <button id="btnMarkAllRead" class="btn btn-sm btn-secondary">Đọc hết</button>
+        <button id="btnCloseDrawer" class="close-btn">&times;</button>
+      </div>
+    </div>
+    <div id="notificationList" class="drawer-body"></div>
+  </aside>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
