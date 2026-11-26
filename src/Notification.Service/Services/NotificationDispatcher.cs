@@ -101,16 +101,16 @@ public sealed class NotificationDispatcher(
         return evt.EventType switch
         {
             MessagingConstants.RoutingKeySubmitted => isApprover
-                ? $"[{evt.Actor}] vừa gửi tài liệu "{evt.Title}" chờ bạn phê duyệt."
-                : $"Tài liệu "{evt.Title}" đã được gửi tới [{evt.AssignedApprover}] để phê duyệt.",
+                ? $"[{evt.Actor}] vừa gửi tài liệu \"{evt.Title}\" chờ bạn phê duyệt."
+                : $"Tài liệu \"{evt.Title}\" đã được gửi tới [{evt.AssignedApprover}] để phê duyệt.",
 
             MessagingConstants.RoutingKeyApproved =>
-                $"[{evt.Actor}] đã PHÊ DUYỆT tài liệu "{evt.Title}".",
+                $"[{evt.Actor}] đã PHÊ DUYỆT tài liệu \"{evt.Title}\".",
 
             MessagingConstants.RoutingKeyRejected =>
-                $"[{evt.Actor}] đã TỪ CHỐI tài liệu "{evt.Title}". Lý do: {evt.Comment}",
+                $"[{evt.Actor}] đã TỪ CHỐI tài liệu \"{evt.Title}\". Lý do: {evt.Comment}",
 
-            _ => $"Tài liệu "{evt.Title}" vừa chuyển trạng thái sang {evt.ToStatus}."
+            _ => $"Tài liệu \"{evt.Title}\" vừa chuyển trạng thái sang {evt.ToStatus}."
         };
     }
 }
