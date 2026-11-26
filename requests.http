@@ -1,0 +1,61 @@
+### Biến môi trường test nhanh (VS Code REST Client)
+@docApi = http://localhost:5001
+@notiApi = http://localhost:5002
+@correlationId = demo-trace-2026-001
+
+### 1. Kiểm tra Health Check của Document.Api
+GET {{docApi}}/health
+
+### 2. Kiểm tra Health Check của Notification.Service
+GET {{notiApi}}/health
+
+### 3. Tạo tài liệu mới (Draft)
+# @name createDoc
+POST {{docApi}}/documents
+Content-Type: application/json
+X-Correlation-Id: {{correlationId}}
+
+{
+  "title": "Đề xuất kinh phí hội thảo Phát triển ứng dụng phân tán",
+  "content": "Đề xuất kinh phí tổ chức hội thảo và in ấn tài liệu cho sinh viên K23.",
+  "createdBy": "vinh.duong",
+  "assignedApprover": "truong.khoa"
+}
+
+###
+@docId = {{createDoc.response.body.id}}
+
+### 4. Tra cứu danh sách tài liệu
+GET {{docApi}}/documents
+
+### 5. Tra cứu tài liệu theo trạng thái Draft
+GET {{docApi}}/documents?status=Draft
+
+### 6. Xem chi tiết tài liệu kèm lịch sử
+GET {{docApi}}/documents/{{docId}}
+
+### 7. Gửi tài liệu vào quy trình phê duyệt (Draft -> Submitted)
+POST {{docApi}}/documents/{{docId}}/submit
+Content-Type: application/json
+X-Correlation-Id: {{correlationId}}-submit
+
+{
+  "actor": "vinh.duong",
+  "comment": "Kính gửi trưởng khoa xem xét phê duyệt."
+}
+
+### 8. Phê duyệt tài liệu (Submitted -> Approved)
+POST {{docApi}}/documents/{{docId}}/approve
+Content-Type: application/json
+X-Correlation-Id: {{correlationId}}-approve
+
+{
+  "actor": "truong.khoa",
+  "comment": "Đồng ý phê duyệt triển khai theo kế hoạch."
+}
+
+### 9. Kiểm tra thông báo đã tạo cho người tạo (vinh.duong)
+GET {{notiApi}}/notifications?recipient=vinh.duong
+
+### 10. Kiểm tra thống kê Transactional Outbox
+GET {{docApi}}/outbox/stats

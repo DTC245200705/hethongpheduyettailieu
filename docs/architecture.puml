@@ -1,0 +1,27 @@
+@startuml
+!theme plain
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Người tạo / Người phê duyệt" as User
+
+package "Docker Network (doc-approval-net)" {
+    component "web-client\n(.NET 10 Web App + BFF :5000)" as Client
+    component "document-api\n(.NET 10 Minimal API :5001)\n+ OutboxPublisherWorker" as DocApi
+    database "PostgreSQL 16 (:5432)" {
+        database "document_db\n(documents, document_histories,\noutbox_messages)" as DocDb
+        database "notification_db\n(notifications,\nprocessed_events)" as NotiDb
+    }
+    queue "RabbitMQ 3.13 (:5672 / :15672)\nExchange: doc.events.exchange\nQueue: notification.doc.queue\nDLQ: notification.doc.dlq" as Rabbit
+    component "notification-service\n(.NET 10 Consumer + SignalR :5002)" as NotiSvc
+}
+
+User --> Client : Thao tác tạo / gửi / duyệt / từ chối
+Client --> DocApi : HTTP REST + X-Correlation-Id
+Client --> NotiSvc : HTTP REST (lấy lịch sử thông báo)
+DocApi --> DocDb : EF Core Transaction\n(Document + History + Outbox)
+DocApi --> Rabbit : Publish Persistent Event\n(Outbox Retry Loop)
+Rabbit --> NotiSvc : Consume Event\n(Manual Ack / Retry / DLQ)
+NotiSvc --> NotiDb : Check Idempotency (EventId)\n& Save Notification
+NotiSvc ..> Client : SignalR WebSocket Push\n(/hubs/notifications)
+@enduml

@@ -1,0 +1,36 @@
+@startuml
+!theme plain
+skinparam shadowing false
+
+actor "Người phê duyệt\n(truong.khoa)" as Approver
+participant "web-client" as Web
+participant "document-api" as DocApi
+database "document_db" as DocDb
+queue "RabbitMQ" as MQ
+participant "notification-service" as NotiSvc
+database "notification_db" as NotiDb
+actor "Người tạo\n(vinh.duong)" as Creator
+
+Approver -> Web : Nhấn Phê duyệt (Approve)
+Web -> DocApi : POST /documents/{id}/approve\n(X-Correlation-Id)
+DocApi -> DocDb : BEGIN TX\nUpdate Status=Approved\nInsert DocumentHistory\nInsert OutboxMessage\nCOMMIT TX
+DocApi --> Web : 200 OK (DocumentResponse)
+Web --> Approver : Hiển thị trạng thái Approved
+
+loop OutboxPublisherWorker (mỗi 2s)
+    DocApi -> DocDb : SELECT Outbox chưa gửi
+    DocApi -> MQ : Publish document.approved (Persistent)
+    DocApi -> DocDb : Mark ProcessedAtUtc
+end
+
+MQ -> NotiSvc : Deliver message (document.approved)
+NotiSvc -> NotiDb : Check ProcessedEvents(EventId)
+alt Chưa xử lý
+    NotiSvc -> NotiDb : Insert ProcessedEvent & Notifications
+    NotiSvc -> Creator : SignalR ReceiveNotification (Real-time)
+    NotiSvc -> Approver : SignalR ReceiveNotification (Real-time)
+    NotiSvc -> MQ : BasicAck
+else Đã xử lý (Duplicate)
+    NotiSvc -> MQ : BasicAck (Idempotent Skip)
+end
+@enduml
